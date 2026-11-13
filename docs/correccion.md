@@ -162,3 +162,145 @@ Por la asociatividad de la concatenación, el registro $R$ puede particionarse y
 - El operador lógico $\bigvee$ es **conmutativo** y **asociativo**, por lo que permutar el orden en que se recorren los sismos $s_1 \in R_{r_i}$ o $s_2 \in R_{r_j}$ no altera el valor de verdad de $\Phi(r_i, r_j, \delta)$.
 - La distancia $\vert{}s_1.\text{magnitud} - s_2.\text{magnitud}\vert{}$ es **simétrica** ($\vert{}a - b\vert{} = \vert{}b - a\vert{}$), por lo que invertir el orden de los generadores internos produce exactamente las mismas coincidencias.
 - Finalmente, `.distinct` elimina cualquier multiplicidad y la ordenación de salida queda fijada únicamente por el orden de primera aparición de cada región en $R$.
+
+# Punto 2: Agrupar con Mapas
+
+Fundamentos de Programación Funcional y Concurrente.
+
+## 1. Especificación Matemática del Dominio y las Funciones
+
+Sea $\mathcal{S}$ el conjunto de registros sísmicos y sea $R = [s_1, s_2, \ldots, s_n] \in \text{List}[\mathcal{S}]$ una lista finita de sismos. Definimos el dominio activo de regiones de $R$ como el conjunto:
+
+```math
+\text{Dom}(R) = \{ s.\text{region} \mid s \in R \}
+```
+
+Observemos que si $R = \text{Nil}$, entonces $\text{Dom}(\text{Nil}) = \emptyset$. Para toda región $\rho \notin \text{Dom}(R)$, $\rho$ no pertenece al conjunto de claves de ninguno de los mapas resultantes.
+
+Definimos las tres especificaciones formales:
+
+1. **Especificación de `porRegion`:** Función $f_{\text{porRegion}} : \text{List}[\mathcal{S}] \to (\text{Dom}(R) \to \text{List}[\mathcal{S}])$ tal que para cada $\rho \in \text{Dom}(R)$:
+
+```math
+f_{\text{porRegion}}(R)(\rho) = [\, s \in R \mid s.\text{region} == \rho \,]
+```
+
+donde la comprensión de lista preserva el orden relativo de aparición en $R$.
+
+2. **Especificación de `conteoPorRegion`:** Función $f_{\text{conteo}} : \text{List}[\mathcal{S}] \to (\text{Dom}(R) \to \mathbb{N}^+)$ tal que para cada $\rho \in \text{Dom}(R)$:
+
+```math
+f_{\text{conteo}}(R)(\rho) = |\, [\, s \in R \mid s.\text{region} == \rho \,] \,|
+```
+
+3. **Especificación de `magnitudMaxima`:** Función $f_{\text{max}} : \text{List}[\mathcal{S}] \to (\text{Dom}(R) \to \mathbb{R})$ tal que para cada $\rho \in \text{Dom}(R)$:
+
+```math
+f_{\text{max}}(R)(\rho) = \max \{ s.\text{magnitud} \mid s \in R \land s.\text{region} == \rho \}
+```
+
+---
+
+## 2. Demostración Formal de Corrección
+
+### 2.1. Invariante de Dominio y Unicidad de Claves (`regionesUnicas`)
+
+En las tres funciones se ejecuta inicialmente:
+
+```scala
+val regionesUnicas = r.map(sismo => sismo.region).distinct
+```
+
+- **Propiedad 1 (Exactitud del dominio):** $\forall \rho \in \text{String} : \rho \in \text{regionesUnicas} \iff \rho \in \text{Dom}(R)$. Si $R = \text{Nil}$, $\text{regionesUnicas} = \text{Nil}$ y la conversión `.toMap` sobre una lista vacía produce `Map()`, satisfaciendo $\text{Dom}(f(\text{Nil})) = \emptyset$.
+- **Propiedad 2 (Inyectividad de claves):** Dado que `.distinct` elimina repeticiones, cada $\rho \in \text{Dom}(R)$ aparece exactamente una vez en `regionesUnicas`. Por lo tanto, la lista de pares `pares` no contiene claves duplicadas y `.toMap` establece una biyección entre $\text{Dom}(R)$ y las claves del mapa resultante sin sobrescrituras.
+
+---
+
+### 2.2. Corrección de `porRegion`
+
+Para cada $\rho \in \text{regionesUnicas}$, el programa evalúa:
+
+```scala
+sismosDeRegion = for (sismo <- r if sismo.region == region) yield sismo
+```
+
+Cuya traducción desazucarada es $g(R, \rho) = R.\text{withFilter}(\lambda s.\, s.\text{region} == \rho).\text{map}(\lambda s.\, s)$. Demostramos por inducción estructural sobre $R$ que $g(R, \rho) == [\, s \in R \mid s.\text{region} == \rho \,]$:
+
+- **Caso base ($R = \text{Nil}$):**
+
+```math
+g(\text{Nil}, \rho) \rightarrow \text{Nil}.\text{withFilter}(\lambda s.\, s.\text{region} == \rho).\text{map}(\lambda s.\, s) \rightarrow \text{Nil} == []
+```
+
+- **Caso de inducción ($R = s :: xs$):** Con hipótesis de inducción $g(xs, \rho) == [\, x \in xs \mid x.\text{region} == \rho \,]$:
+    - Si $s.\text{region} == \rho$:
+
+```math
+g(s :: xs, \rho) \rightarrow s :: g(xs, \rho) \stackrel{\text{HI}}{=} s :: [\, x \in xs \mid x.\text{region} == \rho \,] == [\, x \in (s :: xs) \mid x.\text{region} == \rho \,]
+```
+
+- Si $s.\text{region} \neq \rho$:
+
+```math
+g(s :: xs, \rho) \rightarrow g(xs, \rho) \stackrel{\text{HI}}{=} [\, x \in xs \mid x.\text{region} == \rho \,] == [\, x \in (s :: xs) \mid x.\text{region} == \rho \,]
+```
+
+En consecuencia, para toda clave $\rho \in \text{Dom}(R)$, `porRegion(R)(ρ) == f_porRegion(R)(ρ)`.
+
+---
+
+### 2.3. Corrección de `conteoPorRegion`
+
+Para cada $\rho \in \text{regionesUnicas}$, el valor asociado es `g(R, ρ).length`. Dado que ya se demostró que $g(R, \rho) == f_{\text{porRegion}}(R)(\rho)$ y la función `.length` es un homomorfismo que calcula la cardinalidad exacta de una lista finita:
+
+```math
+\forall \rho \in \text{Dom}(R) : P_{\text{conteo}}(R)(\rho) == g(R, \rho).\text{length} == |f_{\text{porRegion}}(R)(\rho)| == f_{\text{conteo}}(R)(\rho)
+```
+
+Además, como $\rho \in \text{Dom}(R)$ implica que existe al menos un $s \in R$ con $s.\text{region} == \rho$, se garantiza que $P_{\text{conteo}}(R)(\rho) \geq 1$.
+
+---
+
+### 2.4. Corrección de `magnitudMaxima`
+
+Para cada $\rho \in \text{regionesUnicas}$, el programa calcula `magnitudes = g(R, ρ).map(_.magnitud)` y retorna `magnitudes.max`.
+
+1. **Garantía de no-vacuidad (Totalidad de `.max`):**
+   Dado que $\rho \in \text{regionesUnicas} \implies \rho \in \text{Dom}(R)$, existe al menos un elemento en $g(R, \rho)$, por lo que $\text{magnitudes}.\text{length} \geq 1$. Esto demuestra matemáticamente que `.max` nunca se invoca sobre una lista vacía.
+
+2. **Corrección por inducción sobre la lista no vacía $M = [m_1, \ldots, m_k]$ ($k \geq 1$):**
+    - **Caso base ($k = 1$):** $[m_1].\text{max} \rightarrow m_1 == \max\{m_1\}$.
+    - **Caso de inducción ($k + 1$):** $[m_1, \ldots, m_{k+1}].\text{max} \rightarrow \max(m_1, [m_2, \ldots, m_{k+1}].\text{max}) \stackrel{\text{HI}}{=} \max(m_1, \max\{m_2, \ldots, m_{k+1}\}) == \max\{m_1, \ldots, m_{k+1}\}$.
+
+Por lo tanto, $\forall \rho \in \text{Dom}(R) : P_{\text{max}}(R)(\rho) == f_{\text{max}}(R)(\rho)$.
+
+---
+
+## 3. Argumentación de por qué el resultado no depende del orden del recorrido
+
+En Scala, un `Map[K, V]` es una **estructura algebraica extensional** (un conjunto de asociaciones clave-valor): la igualdad entre dos mapas $M_1 == M_2$ se define exclusivamente por poseer el mismo conjunto de claves y asociar valores iguales a cada clave, sin importar el orden en que se inserten o recorran dichas claves.
+
+1. **Invariancia de claves respecto al orden de recorrido de $R$:**
+   Sea $\pi(R)$ cualquier permutación de los elementos del registro $R$. El conjunto de regiones únicas satisface:
+
+```math
+\text{Set}(\text{regionesUnicas}(R)) == \text{Dom}(R) == \text{Dom}(\pi(R)) == \text{Set}(\text{regionesUnicas}(\pi(R)))
+```
+
+Aunque el orden de las tuplas en `pares` cambie al permutar $R$, el operador `.toMap` construye el mismo diccionario extensional.
+
+2. **Invariancia de los valores agregados en `conteoPorRegion` y `magnitudMaxima`:**
+    - **En `conteoPorRegion`:** La suma/conteo de elementos satisface propiedades de **monoide conmutativo** $(\mathbb{N}, +, 0)$. Para cualquier permutación $\pi(R)$:
+
+```math
+|[\, s \in \pi(R) \mid s.\text{region} == \rho \,]| == |[\, s \in R \mid s.\text{region} == \rho \,]|
+```
+
+- **En `magnitudMaxima`:** La operación binaria $\max : \mathbb{R} \times \mathbb{R} \to \mathbb{R}$ es **asociativa**, **conmutativa** e **idempotente** ($\max(a, b) = \max(b, a)$, $\max(a, \max(b, c)) = \max(\max(a, b), c)$, $\max(a, a) = a$). En consecuencia, el máximo de un subconjunto no vacío de magnitudes es completamente invariante ante cualquier orden de recorrido o particionamiento de $R$:
+
+```math
+\max_{s \in \pi(R_\rho)} (s.\text{magnitud}) == \max_{s \in R_\rho} (s.\text{magnitud})
+```
+
+3. **Invariancia en `porRegion` como multiconjunto de eventos por región:**
+   Para cada región $\rho \in \text{Dom}(R)$, el filtro `sismo.region == region` es una función pura sin efectos secundarios; el conjunto de sismos seleccionados para $\rho$ depende únicamente de los atributos intrínsecos de cada `Sismo` en $R$, conservando exactamente los mismos elementos bajo cualquier estrategia de evaluación (ansiosa, perezosa o paralela).

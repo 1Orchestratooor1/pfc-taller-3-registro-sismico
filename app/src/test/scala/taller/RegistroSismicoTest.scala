@@ -128,6 +128,41 @@ class RegistroSismicoTest extends AnyFunSuite {
     assert(!magnitudMaxima(registro).contains("Amazonas"))
   }
 
+  // Estas son las 5 pruebas adicionales para demostrar la validez de las definciones - punto 2
+
+  test("porRegion: sobre el registro vacío devuelve mapa vacío") {
+    assert(porRegion(vacio) == Map())
+  }
+
+  test("porRegion: conserva el orden cronológico/de aparición de los sismos en cada región") {
+    val agrupado = porRegion(registro)
+    assert(agrupado("Valle").map(_.magnitud) == List(4.2, 3.8, 5.3))
+    assert(agrupado("Santander").map(_.fecha.mes) == List(3, 5))
+  }
+
+  test("conteoPorRegion: registro con una sola región repetida devuelve una única clave") {
+    val unSoloDepto = List(
+      Sismo(Fecha(2025, 1), "Tolima", 3.2, 10),
+      Sismo(Fecha(2025, 2), "Tolima", 4.1, 12),
+      Sismo(Fecha(2025, 3), "Tolima", 2.9, 8)
+    )
+    assert(conteoPorRegion(unSoloDepto) == Map("Tolima" -> 3))
+    assert(!conteoPorRegion(unSoloDepto).contains("Valle"))
+  }
+
+  test("magnitudMaxima: sobre el registro vacío devuelve mapa vacío") {
+    assert(magnitudMaxima(vacio) == Map())
+  }
+
+  test("magnitudMaxima: maneja correctamente empates de magnitud máxima en una región") {
+    val regEmpate = List(
+      Sismo(Fecha(2025, 1), "Huila", 4.8, 20),
+      Sismo(Fecha(2025, 2), "Huila", 4.8, 35),
+      Sismo(Fecha(2025, 3), "Meta", 3.5, 15)
+    )
+    assert(magnitudMaxima(regEmpate) == Map("Huila" -> 4.8, "Meta" -> 3.5))
+  }
+
   // Punto 3 -------------------------------------------------------------------
 
   test("conteoSeguro: una región desconocida responde cero") {

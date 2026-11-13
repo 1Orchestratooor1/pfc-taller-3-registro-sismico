@@ -274,3 +274,243 @@ sequenceDiagram
     Par3-->>Main: vacío
     Main->>Main: pares.toList.distinct
 ```
+
+# Punto 2: agrupar con mapas
+
+## Definición de los Algoritmos
+
+```Scala
+def porRegion(r: Registro): Map[String, List[Sismo]] = {
+  val regionesUnicas = r.map(sismo => sismo.region).distinct
+  val pares = for {
+    region <- regionesUnicas
+    sismosDeRegion = for (sismo <- r if sismo.region == region) yield sismo
+  } yield (region, sismosDeRegion)
+  
+  pares.toMap
+}
+
+def conteoPorRegion(r: Registro): Map[String, Int] = {
+  val regionesUnicas = r.map(sismo => sismo.region).distinct
+  val pares = for {
+    region <- regionesUnicas
+    cantidad = (for (sismo <- r if sismo.region == region) yield sismo).length
+  } yield (region, cantidad)
+
+  pares.toMap
+}
+
+def magnitudMaxima(r: Registro): Map[String, Double] = {
+  val regionesUnicas = r.map(sismo => sismo.region).distinct
+  val pares = for {
+    region <- regionesUnicas
+    magnitudes = for (sismo <- r if sismo.region == region) yield sismo.magnitud
+  } yield (region, magnitudes.max)
+
+  pares.toMap
+}
+```
+
+- La función `porRegion` construye un mapa inmutable `Map[String, List[Sismo]]` que asocia cada región presente en el registro con la sublista de sus sismos en orden de aparición.
+- La función `conteoPorRegion` genera un mapa `Map[String, Int]` con la cantidad total de eventos sísmicos ocurridos en cada región registrada.
+- La función `magnitudMaxima` produce un mapa `Map[String, Double]` con la mayor magnitud registrada por región:
+  - `regionesUnicas`: secuencia sin duplicados de las regiones que aparecen en `r`.
+  - `pares`: lista de tuplas `(clave, valor)` transformada finalmente en un mapa mediante `.toMap`.
+
+---
+
+## Traducción de las Expresiones `for`
+
+El compilador de Scala desazucara cada expresión `for` en llamadas encadenadas a `map` y `withFilter` (*Programming in Scala*, Cap. 23).
+
+### Traducción de `porRegion`
+
+```Scala
+val pares = regionesUnicas
+  .map { region =>
+    val sismosDeRegion = r.withFilter(sismo => sismo.region == region)
+                          .map(sismo => sismo)
+    (region, sismosDeRegion)
+  }
+  .map { case (region, sismosDeRegion) =>
+    (region, sismosDeRegion)
+  }
+```
+
+- El `for` interno (`for (sismo <- r if sismo.region == region) yield sismo`) se traduce a `r.withFilter(...).map(...)`.
+- La asignación intermedia `sismosDeRegion = ...` dentro del `for` externo se traduce mediante un primer `.map` que empaqueta `(region, sismosDeRegion)`, seguido de un segundo `.map` correspondiente al `yield` final.
+
+### Traducción de `conteoPorRegion`
+
+```Scala
+val pares = regionesUnicas
+  .map { region =>
+    val cantidad = r.withFilter(sismo => sismo.region == region)
+                    .map(sismo => sismo)
+                    .length
+    (region, cantidad)
+  }
+  .map { case (region, cantidad) =>
+    (region, cantidad)
+  }
+```
+
+- El `for` interno filtra los sismos de `region`, proyecta la sublista y calcula su cardinalidad mediante `.length`.
+- El resultado entero se empaqueta junto a `region` para ser convertido en `Map[String, Int]` con `.toMap`.
+
+### Traducción de `magnitudMaxima`
+
+```Scala
+val pares = regionesUnicas
+  .map { region =>
+    val magnitudes = r.withFilter(sismo => sismo.region == region)
+                      .map(sismo => sismo.magnitud)
+    (region, magnitudes)
+  }
+  .map { case (region, magnitudes) =>
+    (region, magnitudes.max)
+  }
+```
+
+- El `for` interno filtra los sismos por región y proyecta únicamente el campo `magnitud` (`List[Double]`).
+- El `yield` final aplica `.max` sobre `magnitudes` y construye la tupla `(region, Double)`.
+
+---
+
+## Explicación paso a paso
+
+### Construcción del dominio de claves (`regionesUnicas`)
+
+```Scala
+val regionesUnicas = r.map(sismo => sismo.region).distinct
+```
+
+- Se proyecta el atributo `region` de todos los sismos en `r`.
+- `.distinct` elimina repeticiones, garantizando que las regiones ausentes en `r` nunca aparezcan en el mapa y que si `r` es `Nil`, `regionesUnicas` sea `Nil` (produciendo `Map()`).
+
+### Agrupación y reducción por clave
+
+En las tres funciones, por cada `region` en `regionesUnicas`:
+1. Se recorre `r` filtrando los sismos cuyo atributo `region` coincide con la clave actual.
+2. Se aplica la operación de agregación correspondiente:
+  - Identidad de lista (`List[Sismo]`) en `porRegion`.
+  - Conteo de elementos (`.length`) en `conteoPorRegion`.
+  - Máximo numérico (`.max`) en `magnitudMaxima`.
+3. Se invoca `.toMap` sobre la lista de tuplas `List[(String, V)]` para construir el diccionario inmutable.
+
+---
+
+## Traza de ejecución paso a paso
+
+Ejemplo con `registro` (7 sismos):
+
+```Scala
+magnitudMaxima(registro)
+```
+
+### Paso 1: Extracción de regiones únicas
+
+```Scala
+r.map(_.region) // List("Valle", "Santander", "Valle", "Choco", "Santander", "Valle", "Choco")
+regionesUnicas  // List("Valle", "Santander", "Choco")
+```
+
+### Paso 2: Procesamiento de `region = "Valle"`
+
+```Scala
+magnitudes = List(4.2, 3.8, 5.3)
+magnitudes.max // 5.3
+// Tupla generada: ("Valle", 5.3)
+```
+
+### Paso 3: Procesamiento de `region = "Santander"`
+
+```Scala
+magnitudes = List(5.1, 4.7)
+magnitudes.max // 5.1
+// Tupla generada: ("Santander", 5.1)
+```
+
+### Paso 4: Procesamiento de `region = "Choco"`
+
+```Scala
+magnitudes = List(6.0, 3.1)
+magnitudes.max // 6.0
+// Tupla generada: ("Choco", 6.0)
+```
+
+### Paso 5: Construcción del mapa final
+
+```Scala
+List(("Valle", 5.3), ("Santander", 5.1), ("Choco", 6.0)).toMap
+// return Map("Valle" -> 5.3, "Santander" -> 5.1, "Choco" -> 6.0)
+```
+
+---
+
+### Traza de `conteoPorRegion(registro)`
+
+### Paso 1: Regiones únicas
+
+```Scala
+regionesUnicas = List("Valle", "Santander", "Choco")
+```
+
+### Paso 2: Cálculo de cardinalidades por región
+
+```Scala
+"Valle"     -> List(s0, s2, s5).length = 3 -> ("Valle", 3)
+"Santander" -> List(s1, s4).length     = 2 -> ("Santander", 2)
+"Choco"     -> List(s3, s6).length     = 2 -> ("Choco", 2)
+```
+
+### Paso 3: Retorno
+
+```Scala
+pares.toMap // return Map("Valle" -> 3, "Santander" -> 2, "Choco" -> 2)
+```
+
+---
+
+## Diferencia con agrupación mutable imperativa
+
+- En un **enfoque imperativo** se instancia un `mutable.Map` vacío y se mutan sus entradas en cada iteración verificando manualmente si la clave ya existe (`contains`), incrementando contadores o reemplazando máximos con variables locales.
+- En el **enfoque funcional**, el mapa se construye de una sola vez a partir de una colección inmutable de pares clave-valor `(K, V)`, garantizando ausencia de efectos secundarios e inmutabilidad estructural.
+
+---
+
+## Ejemplo de uso
+
+```Scala
+val m1 = porRegion(registro)
+println(m1("Santander").length) // 2
+
+val m2 = conteoPorRegion(registro)
+println(m2) // Map(Valle -> 3, Santander -> 2, Choco -> 2)
+
+val m3 = magnitudMaxima(registro)
+println(m3) // Map(Valle -> 5.3, Santander -> 5.1, Choco -> 6.0)
+```
+
+---
+
+## Diagrama de flujo de ejecución en `magnitudMaxima`
+
+```mermaid
+sequenceDiagram
+    participant Main as magnitudMaxima(registro)
+    participant Reg as regionesUnicas
+    participant V as Región "Valle"
+    participant S as Región "Santander"
+    participant C as Región "Choco"
+
+    Main->>Reg: r.map(_.region).distinct
+    Reg-->>Main: List("Valle", "Santander", "Choco")
+    Main->>V: filtrar y proyectar magnitudes
+    V-->>Main: ("Valle", 5.3)
+    Main->>S: filtrar y proyectar magnitudes
+    S-->>Main: ("Santander", 5.1)
+    Main->>C: filtrar y proyectar magnitudes
+    C-->>Main: ("Choco", 6.0)
+    Main->>Main: pares.toMap
+```

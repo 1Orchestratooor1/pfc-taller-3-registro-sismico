@@ -50,11 +50,36 @@ class RegistroSismico {
 
   // Punto 2: agrupar con mapas --------------------------------------------------
 
-  def porRegion(r: Registro): Map[String, List[Sismo]] = ???
+  def porRegion(r: Registro): Map[String, List[Sismo]] = {
+    val regionesUnicas = r.map(sismo => sismo.region).distinct
+    val pares = for {
+      region <- regionesUnicas
+      sismosDeRegion = for (sismo <- r if sismo.region == region) yield sismo
+    } yield (region, sismosDeRegion)
 
-  def conteoPorRegion(r: Registro): Map[String, Int] = ???
+    pares.toMap
+  }
 
-  def magnitudMaxima(r: Registro): Map[String, Double] = ???
+  def conteoPorRegion(r: Registro): Map[String, Int] = {
+    val regionesUnicas = r.map(sismo => sismo.region).distinct
+    val pares = for {
+      region <- regionesUnicas
+      cantidad = (for (sismo <- r if sismo.region == region) yield sismo).length
+    } yield (region, cantidad)
+
+    pares.toMap
+  }
+
+  def magnitudMaxima(r: Registro): Map[String, Double] = {
+    val regionesUnicas = r.map(sismo => sismo.region).distinct
+    val pares = for {
+      region <- regionesUnicas
+      magnitudes = for (sismo <- r if sismo.region == region) yield sismo.magnitud
+    } yield (region, magnitudes.max)
+
+    pares.toMap
+  }
+
 
   // Punto 3: consultas seguras --------------------------------------------------
 
