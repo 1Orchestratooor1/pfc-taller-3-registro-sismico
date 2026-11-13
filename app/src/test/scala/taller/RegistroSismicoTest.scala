@@ -66,6 +66,43 @@ class RegistroSismicoTest extends AnyFunSuite {
     assert(paresCercanos(registro, 5.0).forall { case (a, b) => a != b })
   }
 
+  // Estas son las 5 pruebas adicionales para demostrar la validez de las definciones - punto 1
+
+  test("fuertes: sobre el registro vacío devuelve lista vacía") {
+    assert(fuertes(vacio, 0.0) == List())
+  }
+
+  test("fuertes: con umbral negativo incluye todos los sismos en orden") {
+    assert(fuertes(registro, -1.0) ==
+      List("Valle", "Santander", "Valle", "Choco", "Santander", "Valle", "Choco"))
+  }
+
+  test("enRegion: distingue mayúsculas y minúsculas en el nombre de la región") {
+    assert(enRegion(registro, "valle") == List())
+  }
+
+  test("paresCercanos: cumple cuando la diferencia es exactamente igual a dif") {
+    // Entre Santander (5.1) y Valle (5.3) la diferencia exacta es 0.20000000000000018 (en punto flotante)
+    // Probamos con sismos de diferencia exacta sin error binario: 4.0 y 4.5 (dif = 0.5)
+    val regExacto = List(
+      Sismo(Fecha(2025, 1), "Nariño", 4.0, 10),
+      Sismo(Fecha(2025, 2), "Cauca", 4.5, 20)
+    )
+    assert(paresCercanos(regExacto, 0.5) == List(("Nariño", "Cauca")))
+  }
+
+  test("paresCercanos: regiones intercaladas mantienen orden de primera aparición y sin simétricos") {
+    // Aunque el par cercano ocurre entre sismo 2 (Antioquia, 4.9) y sismo 3 (Caldas, 5.0),
+    // "Caldas" apareció primero en el índice 0, por lo que debe salir ("Caldas", "Antioquia").
+    val regIntercalado = List(
+      Sismo(Fecha(2025, 1), "Caldas", 2.0, 15),
+      Sismo(Fecha(2025, 2), "Antioquia", 4.9, 30),
+      Sismo(Fecha(2025, 3), "Caldas", 5.0, 25),
+      Sismo(Fecha(2025, 4), "Antioquia", 5.0, 40)
+    )
+    assert(paresCercanos(regIntercalado, 0.2) == List(("Caldas", "Antioquia")))
+  }
+
   // Punto 2 -------------------------------------------------------------------
 
   test("porRegion: agrupa los siete sismos en tres regiones") {

@@ -1,131 +1,276 @@
-# Algoritmo Factorial con Recursión de Cola
-
-## Definición del Algoritmo
+# Punto 1 - Consultas con Expresiones `for`
+## Definición de los Algoritmos
 
 ```Scala
-def factorial(n: Int): BigInt = {
-  @annotation.tailrec
-  def loop(x: Int, acumulador: BigInt): BigInt = {
-    if (x <= 1) acumulador
-    else loop(x - 1, acumulador * x)
-  }
-  loop(n, 1)
+def fuertes(r: Registro, umbral: Double): List[String] =
+  for {
+    sismo <- r
+    if sismo.magnitud > umbral
+  } yield sismo.region
+
+def enRegion(r: Registro, region: String): List[Double] =
+  for {
+    sismo <- r
+    if sismo.region == region
+  } yield sismo.magnitud
+
+def paresCercanos(r: Registro, dif: Double): List[(String, String)] = {
+  val regiones = (for {
+    sismo <- r
+  } yield sismo.region).distinct
+
+  val pares = for {
+    i <- 0 until regiones.length
+    j <- (i + 1) until regiones.length
+    reg1 = regiones(i)
+    reg2 = regiones(j)
+    sismo1 <- r
+    if sismo1.region == reg1
+    sismo2 <- r
+    if sismo2.region == reg2
+    if (sismo1.magnitud - sismo2.magnitud).abs <= dif
+  } yield (reg1, reg2)
+
+  pares.toList.distinct
 }
 ```
 
-* La función `factorial` calcula el factorial de un número `n` utilizando **recursión de cola**.
-* La función interna `loop` es la que hace la recursión:
+- La función `fuertes` obtiene las regiones de los sismos cuya magnitud supera estrictamente el `umbral`, conservando el orden original y los repetidos.
+- La función `enRegion` extrae las magnitudes registradas para una `region` específica.
+- La función `paresCercanos` encuentra las parejas de regiones distintas cuyos sismos tienen una diferencia absoluta de magnitud menor o igual a `dif`, evitando duplicados simétricos y respetando el orden de aparición en el registro:
+    - `regiones`: lista de regiones únicas en su orden de aparición.
+    - `pares`: combinaciones ordenadas `(reg1, reg2)` generadas a partir de índices `i < j`.
 
-  * Recibe dos parámetros:
+---
 
-    * `x`: el valor actual decreciente hasta llegar a 1.
-    * `acumulador`: donde se guarda el resultado parcial en cada paso.
-* El decorador `@annotation.tailrec` obliga a que la función sea optimizada como recursión de cola, es decir, **no se acumulan llamados en la pila**.
+## Traducción de las Expresiones `for`
+
+El compilador de Scala traduce cada expresión `for` antes de la verificación de tipos a llamadas de métodos de orden superior (`map`, `flatMap` y `withFilter`).
+
+### Traducción de `fuertes`
+
+```Scala
+r.withFilter(sismo => sismo.magnitud > umbral)
+ .map(sismo => sismo.region)
+```
+
+- `withFilter` filtra de manera perezosa los sismos que cumplen `sismo.magnitud > umbral` sin crear colecciones intermedias.
+- `map` transforma cada sismo filtrado en su atributo `region`.
+
+### Traducción de `enRegion`
+
+```Scala
+r.withFilter(sismo => sismo.region == region)
+ .map(sismo => sismo.magnitud)
+```
+
+- `withFilter` selecciona únicamente los sismos donde `sismo.region == region`.
+- `map` extrae el atributo `magnitud` de cada elemento seleccionado.
+
+### Traducción de `paresCercanos`
+
+#### 1. Expresión `for` para obtener `regiones`
+
+```Scala
+val regiones = r.map(sismo => sismo.region).distinct
+```
+
+- Un único generador sin guarda se traduce directamente a `map`, seguido de `.distinct` para eliminar repetidos preservando el orden de primera aparición.
+
+#### 2. Expresión `for` para obtener `pares`
+
+```Scala
+val pares = (0 until regiones.length).flatMap { i =>
+  ((i + 1) until regiones.length)
+    .map { j =>
+      val reg1 = regiones(i)
+      val reg2 = regiones(j)
+      (j, reg1, reg2)
+    }
+    .flatMap { case (j, reg1, reg2) =>
+      r.withFilter(sismo1 => sismo1.region == reg1)
+       .flatMap { sismo1 =>
+         r.withFilter(sismo2 => sismo2.region == reg2)
+          .withFilter(sismo2 => (sismo1.magnitud - sismo2.magnitud).abs <= dif)
+          .map(_ => (reg1, reg2))
+       }
+    }
+}
+```
+
+- Las definiciones intermedias `reg1 = regiones(i)` y `reg2 = regiones(j)` se traducen mediante un `.map` que agrupa el índice `j` con los valores calculados en una tupla.
+- Cada condición `if` se traduce en una llamada a `.withFilter`.
+- Cada generador externo (`i`, `j`, `sismo1`) se traduce a `.flatMap`, mientras que el último generador (`sismo2`) se traduce a `.map`.
+
+---
 
 ## Explicación paso a paso
 
-### Caso base
+### Ejecución de `fuertes`
 
 ```Scala
-if (x <= 1) acumulador
+if sismo.magnitud > umbral
 ```
 
-Cuando `x` llega a `1`, la función retorna directamente el valor acumulado, evitando más llamadas.
+En cada elemento del registro:
+- Se evalúa si su magnitud supera `umbral`.
+- Si cumple, su región se añade a la lista resultante; de lo contrario, se ignora.
 
-### Caso recursivo
+### Ejecución de `enRegion`
 
 ```Scala
-loop(x - 1, acumulador * x)
+if sismo.region == region
 ```
 
-En cada llamada:
+En cada elemento del registro:
+- Se compara `sismo.region` con el parámetro `region`.
+- Si coinciden, se proyecta `sismo.magnitud`.
 
-* Se reduce el valor de `x` en 1.
-* Se multiplica el acumulador por `x` y se pasa a la siguiente iteración.
-* Como es recursión de cola, la llamada recursiva es la **última instrucción** en ejecutarse, lo que permite a Scala optimizar la pila.
+### Ejecución de `paresCercanos`
+
+1. Se extraen las regiones únicas en orden de aparición (`regiones`).
+2. Se generan pares de índices `i < j` sobre `regiones` para garantizar que `reg1` apareció antes que `reg2` y que nunca se evalúe una pareja simétrica `(reg2, reg1)`.
+3. Para cada par `(reg1, reg2)`, se cruzan los sismos de `reg1` con los sismos de `reg2` verificando `(sismo1.magnitud - sismo2.magnitud).abs <= dif`.
+4. Se convierte el resultado a lista y se aplica `.distinct` para dejar una sola ocurrencia por pareja.
 
 ---
 
-## Llamados de pila en recursión de cola
+## Traza de ejecución paso a paso
 
-Ejemplo:
+Ejemplo con `registro` (7 sismos):
 
 ```Scala
-factorial(5)
+fuertes(registro, 5.0)
 ```
 
-### Paso 1: Llamada inicial
+### Paso 1: Sismo 1 (`"Valle"`, `4.2`)
 
 ```Scala
-loop(5, 1)
+4.2 > 5.0 // false -> descartado
 ```
 
-### Paso 2: Primera iteración
+### Paso 2: Sismo 2 (`"Santander"`, `5.1`)
 
 ```Scala
-loop(4, 5)   // acumulador = 1 * 5
+5.1 > 5.0 // true -> acumulado: List("Santander")
 ```
 
-### Paso 3: Segunda iteración
+### Paso 3: Sismo 3 (`"Valle"`, `3.8`)
 
 ```Scala
-loop(3, 20)  // acumulador = 5 * 4
+3.8 > 5.0 // false -> descartado
 ```
 
-### Paso 4: Tercera iteración
+### Paso 4: Sismo 4 (`"Choco"`, `6.0`)
 
 ```Scala
-loop(2, 60)  // acumulador = 20 * 3
+6.0 > 5.0 // true -> acumulado: List("Santander", "Choco")
 ```
 
-### Paso 5: Cuarta iteración
+### Paso 5: Sismo 5 (`"Santander"`, `4.7`)
 
 ```Scala
-loop(1, 120) // acumulador = 60 * 2
+4.7 > 5.0 // false -> descartado
 ```
 
-### Paso 6: Caso base
+### Paso 6: Sismo 6 (`"Valle"`, `5.3`)
 
 ```Scala
-return 120
+5.3 > 5.0 // true -> acumulado: List("Santander", "Choco", "Valle")
+```
+
+### Paso 7: Sismo 7 (`"Choco"`, `3.1`)
+
+```Scala
+3.1 > 5.0 // false -> descartado
+```
+
+### Paso 8: Retorno
+
+```Scala
+return List("Santander", "Choco", "Valle")
 ```
 
 ---
 
-## Diferencia con recursión normal
+### Traza de `paresCercanos(registro, 0.6)`
 
-* En **recursión normal** cada llamada queda en la pila esperando a que termine la siguiente, lo que puede causar desbordamiento si `n` es muy grande.
-* En **recursión de cola**, el compilador transforma el proceso en un **bucle optimizado**, por lo que no se guarda cada llamada en la pila y el algoritmo puede ejecutarse para valores muy grandes sin problema.
+### Paso 1: Extracción de regiones únicas
+
+```Scala
+regiones = List("Valle", "Santander", "Choco")
+```
+
+### Paso 2: Combinación `i = 0, j = 1` (`"Valle"`, `"Santander"`)
+
+```Scala
+// Sismos Valle: [4.2, 3.8, 5.3] | Sismos Santander: [5.1, 4.7]
+(4.2 - 4.7).abs <= 0.6 // true (0.5 <= 0.6) -> emite ("Valle", "Santander")
+(5.3 - 5.1).abs <= 0.6 // true (0.2 <= 0.6) -> emite ("Valle", "Santander")
+(5.3 - 4.7).abs <= 0.6 // true (0.6 <= 0.6) -> emite ("Valle", "Santander")
+```
+
+### Paso 3: Combinación `i = 0, j = 2` (`"Valle"`, `"Choco"`)
+
+```Scala
+// Sismos Valle: [4.2, 3.8, 5.3] | Sismos Choco: [6.0, 3.1]
+// Diferencia mínima: (3.8 - 3.1).abs = 0.7 > 0.6 -> no emite nada
+```
+
+### Paso 4: Combinación `i = 1, j = 2` (`"Santander"`, `"Choco"`)
+
+```Scala
+// Sismos Santander: [5.1, 4.7] | Sismos Choco: [6.0, 3.1]
+// Diferencia mínima: (5.1 - 6.0).abs = 0.9 > 0.6 -> no emite nada
+```
+
+### Paso 5: Deduplicación y retorno
+
+```Scala
+pares.toList.distinct // return List(("Valle", "Santander"))
+```
+
+---
+
+## Diferencia con ciclos imperativos tradicionales
+
+- En un **enfoque imperativo** se requieren variables mutables, acumuladores externos y bucles anidados explícitos que describen *cómo* recorrer índices y controlar duplicados manualmente.
+- Con **expresiones `for`**, el código es puramente declarativo: describe *qué* propiedades deben cumplir los elementos y delega el recorrido a combinadores de orden superior sin estado mutable.
 
 ---
 
 ## Ejemplo de uso
 
 ```Scala
-val resultado = factorial(5)
-println(resultado)  // 120
+val r1 = fuertes(registro, 5.0)
+println(r1) // List(Santander, Choco, Valle)
+
+val r2 = enRegion(registro, "Valle")
+println(r2) // List(4.2, 3.8, 5.3)
+
+val r3 = paresCercanos(registro, 0.6)
+println(r3) // List((Valle,Santander))
 ```
 
-El resultado de `factorial(5)` es `120`.
+---
 
-
-## Diagrama de llamados de pila con recursión de cola
+## Diagrama de flujo de ejecución en `paresCercanos`
 
 ```mermaid
 sequenceDiagram
-    participant Main as factorial(5)
-    participant L1 as loop(5, 1)
-    participant L2 as loop(4, 5)
-    participant L3 as loop(3, 20)
-    participant L4 as loop(2, 60)
-    participant L5 as loop(1, 120)
+    participant Main as paresCercanos(registro, 0.6)
+    participant Reg as Extracción regiones
+    participant Par1 as Par (Valle, Santander)
+    participant Par2 as Par (Valle, Choco)
+    participant Par3 as Par (Santander, Choco)
 
-    Main->>L1: llamada inicial
-    L1->>L2: tail call con (4, 5)
-    L2->>L3: tail call con (3, 20)
-    L3->>L4: tail call con (2, 60)
-    L4->>L5: tail call con (1, 120)
-    L5-->>Main: return 120
+    Main->>Reg: r.map(_.region).distinct
+    Reg-->>Main: List("Valle", "Santander", "Choco")
+    Main->>Par1: evaluar sismos (i=0, j=1)
+    Par1-->>Main: 3 coincidencias ("Valle", "Santander")
+    Main->>Par2: evaluar sismos (i=0, j=2)
+    Par2-->>Main: vacío
+    Main->>Par3: evaluar sismos (i=1, j=2)
+    Par3-->>Main: vacío
+    Main->>Main: pares.toList.distinct
 ```
-
-
