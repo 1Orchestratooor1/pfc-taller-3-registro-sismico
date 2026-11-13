@@ -1,6 +1,5 @@
 # Punto 1: Consultas con Expresiones `for`
 
-Fundamentos de Programación Funcional y Concurrente.
 
 ## 1. Argumentar la corrección de `fuertes`
 
@@ -164,8 +163,6 @@ Por la asociatividad de la concatenación, el registro $R$ puede particionarse y
 - Finalmente, `.distinct` elimina cualquier multiplicidad y la ordenación de salida queda fijada únicamente por el orden de primera aparición de cada región en $R$.
 
 # Punto 2: Agrupar con Mapas
-
-Fundamentos de Programación Funcional y Concurrente.
 
 ## 1. Especificación Matemática del Dominio y las Funciones
 
@@ -540,3 +537,86 @@ Por tanto, si los nodos de un prefijo $[0, \ldots, n-1]$ son forzados secuencial
 
 2. **Invariancia frente a la estrategia de evaluación (Perezosa vs. Estricta acotada):**
    Debido a la **transparencia referencial**, sustituir una expresión diferida (*thunk*) por su valor evaluado no altera el significado del programa (*Teorema de Church-Rosser* en el cálculo $\lambda$). Mientras el conjunto de índices evaluados sea finito ($k < n$ en `take(n)` o $k \leq K$ en `takeWhile`), el orden temporal en que se fuerzan las clausuras (`head` antes que `tail` o memorización previa) produce exactamente la misma secuencia de salida.
+
+# Punto 5: Informe Combinado
+
+## 1. Especificación Matemática del Dominio y la Función
+
+Sea $\mathcal{S}$ el conjunto de registros sísmicos, sea $R \in \text{List}[\mathcal{S}]$ una lista finita de sismos con dominio activo $\text{Dom}(R) = \{ s.\text{region} \mid s \in R \}$, y sea $\mu \in \mathbb{R}_{> 0}$ el umbral mínimo de magnitud sensible.
+
+Apoyándonos en las especificaciones ya demostradas en los Puntos 2 y 4 ($f_{\text{conteo}}$, $f_{\text{max}}$ y $f_{\text{sensibles}}$), definimos la especificación formal $f_{\text{informe}} : \text{List}[\mathcal{S}] \times \mathbb{R}_{> 0} \to (\text{Dom}(R) \to \text{Resumen})$ tal que:
+
+1. Si $R == \text{Nil}$, entonces $\text{Dom}(\text{Nil}) = \emptyset$ y $f_{\text{informe}}(\text{Nil}, \mu) == \text{Map}()$.
+2. Para toda región $\rho \in \text{Dom}(R)$:
+
+```math
+f_{\text{informe}}(R, \mu)(\rho) = \text{Resumen}\Big( f_{\text{conteo}}(R)(\rho),\; f_{\text{max}}(R)(\rho),\; |f_{\text{sensibles}}(f_{\text{max}}(R)(\rho), \mu)| \Big)
+```
+
+---
+
+## 2. Demostración Formal de Corrección por Composición
+
+El programa implementado $P_{\text{informe}}(R, \mu)$ es:
+
+```scala
+def informe(r: Registro, minimo: Double): Map[String, Resumen] = {
+  val conteos = conteoPorRegion(r)
+  val maximas = magnitudMaxima(r)
+
+  val parejas = for {
+    (region, cantidad) <- conteos
+    maxMag = maximas(region)
+    numReplicas = replicasSensibles(maxMag, minimo).length
+  } yield (region, Resumen(cantidad, maxMag, numReplicas))
+
+  parejas.toMap
+}
+```
+
+Demostramos su corrección en cuatro pasos deductivos:
+
+1. **Invariante de igualdad de dominios (Seguridad de acceso):**
+   Por las demostraciones del Punto 2:
+
+```math
+\text{Dom}(\text{conteos}) == \text{Dom}(R) == \text{Dom}(\text{maximas})
+```
+
+En consecuencia, para todo par $(\rho, c) \in \text{conteos}$, se garantiza que $\rho \in \text{Dom}(\text{maximas})$. Por lo tanto, la consulta parcial `maximas(region)` es **total dentro del contexto de la iteración** y nunca lanza `NoSuchElementException`.
+
+2. **Caso base ($R = \text{Nil}$):**
+   Cuando $R = \text{Nil}$, `conteos == Map()` y `maximas == Map()`. La expresión `for` desazucarada `conteos.map(...)` se evalúa sobre un mapa vacío produciendo una colección vacía, y `.toMap` retorna `Map()`, coincidiendo con $f_{\text{informe}}(\text{Nil}, \mu)$.
+
+3. **Caso general ($R \neq \text{Nil}$):**
+   Para cada entrada $(\rho, c) \in \text{conteos}$:
+    - Por corrección de `conteoPorRegion` (Punto 2): $c == f_{\text{conteo}}(R)(\rho)$.
+    - Por corrección de `magnitudMaxima` (Punto 2): $\text{maxMag} == \text{maximas}(\rho) == f_{\text{max}}(R)(\rho)$.
+    - Por corrección y terminación de `replicasSensibles` (Punto 4): dado que $f_{\text{max}}(R)(\rho) \in \mathbb{R}_{\geq 0}$ y $\mu > 0$, la evaluación de `replicasSensibles(maxMag, minimo)` termina en tiempo finito retornando exactamente $f_{\text{sensibles}}(f_{\text{max}}(R)(\rho), \mu)$, cuya longitud `.length` es $\vert{}f_{\text{sensibles}}(f_{\text{max}}(R)(\rho), \mu)\vert{}$.
+
+4. **Biyección de construcción del mapa final:**
+   Dado que `conteos` no tiene claves duplicadas, la proyección `parejas` asigna una única tupla $(\rho, \text{Resumen}(c, \text{maxMag}, \text{numReplicas}))$ a cada $\rho \in \text{Dom}(R)$. Al aplicar `.toMap`, se obtiene un mapa con dominio $\text{Dom}(R)$ tal que:
+
+```math
+\forall \rho \in \text{Dom}(R) : P_{\text{informe}}(R, \mu)(\rho) == f_{\text{informe}}(R, \mu)(\rho)
+```
+
+Concluimos que $P_{\text{informe}}$ es correcto respecto a su especificación. $\blacksquare$
+
+---
+
+## 3. Argumentación de por qué el resultado no depende del orden del recorrido
+
+1. **Invariancia respecto al orden de los sismos en el registro $R$:**
+   `informe` no inspecciona directamente la lista $R$, sino que actúa como un **combinador puro** (*SICP*, Cap. 1) sobre los resultados de `conteoPorRegion(r)` y `magnitudMaxima(r)`. Como ya se demostró que ambos mapas son extensionalmente invariantes ante cualquier permutación $\pi(R)$ del registro de entrada, los insumos `conteos` y `maximas` son idénticos sin importar el orden en que se recorra $R$.
+
+2. **Invariancia respecto al orden de iteración sobre el mapa `conteos`:**
+   En la expresión `for ((region, cantidad) <- conteos)`, el recorrido interno de las claves de un `Map` en Scala depende de su estructura de dispersión (*HashMap* / *ChampHashMap*). Sin embargo, el resultado final de `informe` es completamente independiente de dicho orden:
+    - **Ausencia de estado compartido (Independencia entre iteraciones):** El cálculo de `Resumen(cantidad, maxMag, numReplicas)` para una clave $\rho_1$ depende exclusivamente de los valores asociados a $\rho_1$ y del parámetro inmutable $\mu$, sin leer ni modificar acumuladores globales ni afectar el cálculo de ninguna otra clave $\rho_2 \neq \rho_1$.
+    - **Extensionalidad de `.toMap`:** Dado que todas las claves $\rho \in \text{Dom}(R)$ son distintas, la reconstrucción del diccionario mediante `.toMap` sobre cualquier permutación $\sigma(\text{parejas})$ produce exactamente el mismo objeto matemático `Map[String, Resumen]`:
+
+```math
+\forall \sigma \in S_{|\text{Dom}(R)|} : \sigma(\text{parejas}).\text{toMap} == \text{parejas}.\text{toMap}
+```
+
+Esto garantiza incluso que los pares `(region, Resumen(...))` podrían evaluarse en paralelo (por ejemplo, mediante colecciones paralelas `.par`) y ensamblarse al final sin alterar jamás el resultado.

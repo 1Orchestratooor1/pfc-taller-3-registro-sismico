@@ -862,3 +862,178 @@ sequenceDiagram
     Map-->>Consumidor: 2.56 (2.56 > 3.0: false -> corte)
     Consumidor->>Consumidor: return List(5.0, 4.0, 3.2)
 ```
+
+# Punto 5: Informe Combinado
+
+## Definición del Algoritmo
+
+```Scala
+case class Resumen(sismos: Int, maxima: Double, replicas: Int)
+
+def informe(r: Registro, minimo: Double): Map[String, Resumen] = {
+  val conteos = conteoPorRegion(r)
+  val maximas = magnitudMaxima(r)
+
+  val parejas = for {
+    (region, cantidad) <- conteos
+    maxMag = maximas(region)
+    numReplicas = replicasSensibles(maxMag, minimo).length
+  } yield (region, Resumen(cantidad, maxMag, numReplicas))
+
+  parejas.toMap
+}
+```
+
+- La clase de caso `Resumen(sismos, maxima, replicas)` encapsula los tres indicadores estadísticos agregados por cada región activa en el registro.
+- La función `informe` integra por composición funcional los módulos construidos en los puntos anteriores (*SICP*, Cap. 1):
+  - `conteos`: mapa `Map[String, Int]` obtenido mediante `conteoPorRegion(r)` con el total de eventos por región.
+  - `maximas`: mapa `Map[String, Double]` obtenido mediante `magnitudMaxima(r)` con la magnitud pico de cada región.
+  - `parejas`: colección de tuplas `(region, Resumen(...))` ensamblada mediante una expresión `for` que consulta la magnitud máxima y calcula la cantidad de réplicas sensibles por encima de `minimo`.
+  - `.toMap`: convierte la secuencia de tuplas en el diccionario inmutable `Map[String, Resumen]`.
+
+---
+
+## Traducción de las Expresiones `for`
+
+El compilador de Scala traduce la expresión `for` de `informe` antes de la verificación de tipos a llamadas encadenadas al método `map` sobre el mapa `conteos: Map[String, Int]` (*Programming in Scala*, Cap. 23):
+
+```Scala
+val parejas = conteos
+  .map { case (region, cantidad) =>
+    val maxMag = maximas(region)
+    val numReplicas = replicasSensibles(maxMag, minimo).length
+    (region, cantidad, maxMag, numReplicas)
+  }
+  .map { case (region, cantidad, maxMag, numReplicas) =>
+    (region, Resumen(cantidad, maxMag, numReplicas))
+  }
+```
+
+- El generador `(region, cantidad) <- conteos` desestructura cada par clave-valor del mapa mediante ajuste de patrones (*pattern matching*).
+- Las definiciones de valor intermedias (`maxMag = ...` y `numReplicas = ...`) se traducen en un primer `.map` que empaqueta los valores calculados en una tupla de 4 elementos.
+- La cláusula `yield (region, Resumen(cantidad, maxMag, numReplicas))` se traduce en un segundo `.map` que proyecta la pareja final `(String, Resumen)` lista para ser transformada con `.toMap`.
+
+---
+
+## Explicación paso a paso
+
+### Fase 1: Agregación base por región
+
+```Scala
+val conteos = conteoPorRegion(r)
+val maximas = magnitudMaxima(r)
+```
+
+- Se calculan de forma independiente los dos mapas base sobre `r`.
+- Si `r` es `Nil`, ambos mapas resultan vacíos (`Map()`), la expresión `for` no realiza ninguna iteración y `parejas.toMap` devuelve `Map()`.
+- Si `r` no es vacío, `conteos` y `maximas` comparten exactamente el mismo conjunto de claves, garantizando que el acceso directo `maximas(region)` nunca lance `NoSuchElementException`.
+
+### Fase 2: Ensamblaje y cálculo de réplicas sensibles
+
+```Scala
+maxMag = maximas(region)
+numReplicas = replicasSensibles(maxMag, minimo).length
+```
+
+Para cada entrada `(region, cantidad)` en `conteos`:
+1. Se recupera `maxMag` desde `maximas(region)`.
+2. Se invoca `replicasSensibles(maxMag, minimo)`, que genera el `LazyList` infinito de réplicas atenuadas por $0.8$, lo acota bajo demanda con `takeWhile(_ > minimo)` y obtiene la cardinalidad de los eventos sensibles con `.length`.
+3. Se instancia el objeto inmutable `Resumen(cantidad, maxMag, numReplicas)` asociado a `region`.
+
+---
+
+## Traza de ejecución paso a paso
+
+Ejemplo con `informe(registro, 3.0)`:
+
+### Paso 1: Cálculo de mapas base
+
+```Scala
+conteos = Map("Valle" -> 3, "Santander" -> 2, "Choco" -> 2)
+maximas = Map("Valle" -> 5.3, "Santander" -> 5.1, "Choco" -> 6.0)
+```
+
+### Paso 2: Iteración 1 (`region = "Valle"`, `cantidad = 3`)
+
+```Scala
+maxMag = maximas("Valle") // 5.3
+replicasSensibles(5.3, 3.0) // List(5.3, 4.24, 3.39)
+numReplicas = 3
+// Tupla generada: ("Valle", Resumen(3, 5.3, 3))
+```
+
+### Paso 3: Iteración 2 (`region = "Santander"`, `cantidad = 2`)
+
+```Scala
+maxMag = maximas("Santander") // 5.1
+replicasSensibles(5.1, 3.0) // List(5.1, 4.08, 3.26)
+numReplicas = 3
+// Tupla generada: ("Santander", Resumen(2, 5.1, 3))
+```
+
+### Paso 4: Iteración 3 (`region = "Choco"`, `cantidad = 2`)
+
+```Scala
+maxMag = maximas("Choco") // 6.0
+replicasSensibles(6.0, 3.0) // List(6.0, 4.8, 3.84, 3.07)
+numReplicas = 4
+// Tupla generada: ("Choco", Resumen(2, 6.0, 4))
+```
+
+### Paso 5: Conversión a mapa y retorno
+
+```Scala
+parejas.toMap
+// return Map(
+//   "Valle"     -> Resumen(3, 5.3, 3),
+//   "Santander" -> Resumen(2, 5.1, 3),
+//   "Choco"     -> Resumen(2, 6.0, 4)
+// )
+```
+
+---
+
+## Diferencia con procesamiento monolítico imperativo
+
+- En un **enfoque imperativo monolítico**, se recorre el arreglo con bucles mutables actualizando simultáneamente contadores, máximos y ciclos internos de simulación por cada registro, acoplando todas las responsabilidades en un único bloque.
+- Con **composición funcional**, `informe` actúa como un combinador declarativo de alto nivel que reutiliza funciones puras verificadas (`conteoPorRegion`, `magnitudMaxima` y `replicasSensibles`) sin estado compartido.
+
+---
+
+## Ejemplo de uso
+
+```Scala
+val reporte = informe(registro, 3.0)
+println(reporte("Choco")) // Resumen(2, 6.0, 4)
+
+val reporteVacio = informe(List(), 3.0)
+println(reporteVacio) // Map()
+```
+
+---
+
+## Diagrama de flujo de ejecución en `informe(registro, 3.0)`
+
+```mermaid
+sequenceDiagram
+    participant Main as informe(registro, 3.0)
+    participant C as conteoPorRegion(r)
+    participant M as magnitudMaxima(r)
+    participant Rep as replicasSensibles(maxMag, 3.0)
+
+    Main->>C: obtener conteos
+    C-->>Main: Map("Valle"->3, "Santander"->2, "Choco"->2)
+    Main->>M: obtener magnitudes máximas
+    M-->>Main: Map("Valle"->5.3, "Santander"->5.1, "Choco"->6.0)
+
+    Main->>Rep: evaluar "Valle" (maxMag = 5.3)
+    Rep-->>Main: List(5.3, 4.24, 3.39) -> length = 3
+
+    Main->>Rep: evaluar "Santander" (maxMag = 5.1)
+    Rep-->>Main: List(5.1, 4.08, 3.26) -> length = 3
+
+    Main->>Rep: evaluar "Choco" (maxMag = 6.0)
+    Rep-->>Main: List(6.0, 4.8, 3.84, 3.07) -> length = 4
+
+    Main->>Main: parejas.toMap
+```

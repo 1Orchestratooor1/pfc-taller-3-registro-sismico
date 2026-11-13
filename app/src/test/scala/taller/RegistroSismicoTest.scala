@@ -322,4 +322,39 @@ class RegistroSismicoTest extends AnyFunSuite {
     assert(informe(registro, 3.0)("Choco").replicas ==
       replicasSensibles(6.0, 3.0).length)
   }
+
+  // Estas son las 5 pruebas adicionales para demostrar la validez de las definciones - punto 5
+
+  test("informe: sobre el registro vacío devuelve mapa vacío") {
+    assert(informe(vacio, 3.0) == Map())
+  }
+
+  test("informe: cuando el mínimo supera todas las máximas, el conteo de réplicas es 0") {
+    assert(informe(registro, 7.0) == Map(
+      "Valle" -> Resumen(3, 5.3, 0),
+      "Santander" -> Resumen(2, 5.1, 0),
+      "Choco" -> Resumen(2, 6.0, 0)
+    ))
+  }
+
+  test("informe: región con un solo sismo calcula correctamente conteo 1 y sus réplicas") {
+    val regSimple = List(Sismo(Fecha(2025, 8), "Quindio", 5.0, 15))
+    // replicasSensibles(5.0, 3.0) -> List(5.0, 4.0, 3.2) -> length = 3
+    assert(informe(regSimple, 3.0) == Map("Quindio" -> Resumen(1, 5.0, 3)))
+  }
+
+  test("informe: agregar un sismo más fuerte en una región actualiza su máxima y sus réplicas") {
+    val regAmpliado = Sismo(Fecha(2025, 9), "Santander", 6.0, 140) :: registro
+    val res = informe(regAmpliado, 3.0)
+    assert(res("Santander") == Resumen(3, 6.0, 4))
+    assert(res("Valle") == Resumen(3, 5.3, 3))
+  }
+
+  test("informe: con mínimo igual a la magnitud máxima de una región, sus réplicas son 0") {
+    // Máxima de Valle es 5.3 exacta; con minimo = 5.3, replicasSensibles(5.3, 5.3) es List() -> 0
+    val res = informe(registro, 5.3)
+    assert(res("Valle") == Resumen(3, 5.3, 0))
+    assert(res("Santander") == Resumen(2, 5.1, 0))
+    assert(res("Choco") == Resumen(2, 6.0, 1))
+  }
 }
