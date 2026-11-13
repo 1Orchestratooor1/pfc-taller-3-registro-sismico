@@ -200,6 +200,45 @@ class RegistroSismicoTest extends AnyFunSuite {
     assert(regionMasActiva(empate) == Some("Arauca"))
   }
 
+  // Estas son las 5 pruebas adicionales para demostrar la validez de las definciones - punto 3
+
+  test("conteoSeguro: sobre el registro vacío devuelve 0 para cualquier región") {
+    val mapaVacioSeguro = conteoSeguro(vacio)
+    assert(mapaVacioSeguro("Valle") == 0)
+    assert(mapaVacioSeguro("Cundinamarca") == 0)
+    assert(mapaVacioSeguro.isEmpty)
+  }
+
+  test("conteoSeguro: mantiene solo las claves reales en el mapa a pesar del valor por defecto") {
+    val mapa = conteoSeguro(registro)
+    assert(mapa("Putumayo") == 0)
+    assert(!mapa.contains("Putumayo"))
+    assert(mapa.keySet == Set("Valle", "Santander", "Choco"))
+  }
+
+  test("maximaDe: sobre el registro vacío devuelve None") {
+    assert(maximaDe(vacio, "Valle") == None)
+  }
+
+  test("maximaDe: devuelve Some con el valor exacto cuando la región tiene un único sismo") {
+    val regUnico = List(Sismo(Fecha(2025, 7), "Boyaca", 4.4, 18))
+    assert(maximaDe(regUnico, "Boyaca") == Some(4.4))
+    assert(maximaDe(regUnico, "Meta") == None)
+  }
+
+  test("regionMasActiva: en caso de empate múltiple elige la primera en orden alfabético") {
+    val regEmpateTriple = List(
+      Sismo(Fecha(2025, 1), "Zulia", 3.5, 10),
+      Sismo(Fecha(2025, 2), "Cauca", 4.1, 20),
+      Sismo(Fecha(2025, 3), "Zulia", 3.9, 15),
+      Sismo(Fecha(2025, 4), "Antioquia", 4.5, 25),
+      Sismo(Fecha(2025, 5), "Cauca", 4.0, 12),
+      Sismo(Fecha(2025, 6), "Antioquia", 3.8, 30)
+    )
+    // Antioquia, Cauca y Zulia empatan con 2 sismos; alfabéticamente gana "Antioquia"
+    assert(regionMasActiva(regEmpateTriple) == Some("Antioquia"))
+  }
+
   // Punto 4 -------------------------------------------------------------------
 
   test("replicas: las primeras cuatro de un sismo de 5.0") {

@@ -514,3 +514,189 @@ sequenceDiagram
     C-->>Main: ("Choco", 6.0)
     Main->>Main: pares.toMap
 ```
+
+# Punto 3: consultas seguras
+
+## Definición de los Algoritmos
+
+```Scala
+def conteoSeguro(r: Registro): Map[String, Int] =
+  conteoPorRegion(r).withDefaultValue(0)
+
+def maximaDe(r: Registro, region: String): Option[Double] =
+  magnitudMaxima(r).get(region)
+
+def regionMasActiva(r: Registro): Option[String] = {
+  val conteo = conteoPorRegion(r)
+
+  if (conteo.isEmpty) {
+    None
+  } else {
+    val cantidades = for ((_, cantidad) <- conteo) yield cantidad
+    val maximo = cantidades.max
+
+    val ganadoras = for {
+      (region, cantidad) <- conteo
+      if cantidad == maximo
+    } yield region
+
+    Some(ganadoras.min)
+  }
+}
+```
+
+- La función `conteoSeguro` envuelve el mapa retornado por `conteoPorRegion(r)` con un valor por defecto (`0`) mediante `.withDefaultValue(0)`, evitando excepciones `NoSuchElementException` al consultar regiones inexistentes.
+- La función `maximaDe` consulta `magnitudMaxima(r)` utilizando el método total `.get(region)`, retornando `Some(magnitud)` si la región existe o `None` si está ausente.
+- La función `regionMasActiva` determina la región con mayor frecuencia de sismos de forma total:
+  - Si `conteo.isEmpty`, retorna `None`.
+  - Si hay registros, encuentra el máximo conteo (`maximo`), filtra las regiones empatadas (`ganadoras`) y selecciona la primera en orden alfabético (`ganadoras.min`) envuelta en `Some`.
+
+---
+
+## Traducción de las Expresiones `for`
+
+El compilador de Scala traduce las expresiones `for` presentes en `regionMasActiva` a invocaciones de `map` y `withFilter` sobre el mapa `conteo: Map[String, Int]` (*Programming in Scala*, Cap. 23).
+
+### Traducción de `cantidades`
+
+```Scala
+val cantidades = conteo.map { case (_, cantidad) => cantidad }
+```
+
+- Al iterar sobre un `Map[String, Int]`, cada elemento es una tupla `(String, Int)`.
+- Un único generador con ajuste de patrones y sin filtro se traduce directamente a `.map`, produciendo un `Iterable[Int]`.
+
+### Traducción de `ganadoras`
+
+```Scala
+val ganadoras = conteo
+  .withFilter { case (region, cantidad) => cantidad == maximo }
+  .map { case (region, cantidad) => region }
+```
+
+- La guarda `if cantidad == maximo` se desazucara en `.withFilter(...)`, filtrando las entradas del mapa sin construir colecciones intermedias.
+- La cláusula `yield region` se traduce en `.map(...)`, proyectando únicamente las claves `String` de las regiones empatadas.
+
+---
+
+## Explicación paso a paso
+
+### Totalidad mediante `withDefaultValue` y `Option`
+
+1. **`conteoSeguro(r)`:**
+  - El método `apply(key)` de un `Map` estándar invoca `default(key)`, el cual por defecto lanza `NoSuchElementException`.
+  - `withDefaultValue(0)` retorna un decorador `Map.WithDefault` que sobrescribe `default(key)` para devolver `0` sin modificar las claves almacenadas en el mapa.
+
+2. **`maximaDe(r, region)`:**
+  - Transforma una función parcial ($K \rightharpoonup V$) en una función total ($K \to \text{Option}[V]$) mediante `.get(region)`.
+
+3. **`regionMasActiva(r)`:**
+  - **Paso 1:** Obtiene `conteo = conteoPorRegion(r)`.
+  - **Paso 2:** Verifica `conteo.isEmpty`. Si es verdadero, corta la ejecución retornando `None` (evitando invocar `.max` o `.min` sobre colecciones vacías).
+  - **Paso 3:** Proyecta las frecuencias (`cantidades`) y obtiene el valor máximo (`maximo`).
+  - **Paso 4:** Filtra todas las regiones cuya frecuencia es igual a `maximo` (`ganadoras`).
+  - **Paso 5:** Calcula `ganadoras.min` usando el orden lexicográfico estándar (`Ordering.String`) para desempatar alfabéticamente y envuelve el resultado en `Some(...)`.
+
+---
+
+## Traza de ejecución paso a paso
+
+### Traza 1: `conteoSeguro(registro)` y `maximaDe(registro, ...)`
+
+```Scala
+val cs = conteoSeguro(registro)
+// Mapa interno: Map("Valle" -> 3, "Santander" -> 2, "Choco" -> 2), default = 0
+
+cs("Valle")    // Clave encontrada -> return 3
+cs("Amazonas") // Clave ausente -> invoca default("Amazonas") -> return 0
+
+maximaDe(registro, "Choco")    // Map(...).get("Choco")    -> return Some(6.0)
+maximaDe(registro, "Amazonas") // Map(...).get("Amazonas") -> return None
+```
+
+---
+
+### Traza 2: `regionMasActiva` con empate alfabético
+
+Supongamos un registro con 2 sismos en `"Santander"` y 2 sismos en `"Choco"`:
+
+```Scala
+val regEmpate = List(
+  Sismo(Fecha(2025, 3), "Santander", 5.1, 150),
+  Sismo(Fecha(2025, 4), "Choco",     6.0, 40),
+  Sismo(Fecha(2025, 5), "Santander", 4.7, 160),
+  Sismo(Fecha(2025, 6), "Choco",     3.1, 20)
+)
+```
+
+### Paso 1: Cálculo de frecuencias
+
+```Scala
+conteo = Map("Santander" -> 2, "Choco" -> 2)
+conteo.isEmpty // false
+```
+
+### Paso 2: Extracción de cantidades y máximo
+
+```Scala
+cantidades = List(2, 2)
+maximo = 2
+```
+
+### Paso 3: Filtrado de regiones ganadoras
+
+```Scala
+ganadoras = List("Santander", "Choco")
+```
+
+### Paso 4: Desempate lexicográfico y retorno
+
+```Scala
+ganadoras.min // "Choco" < "Santander" -> "Choco"
+return Some("Choco")
+```
+
+---
+
+## Diferencia con manejo de errores mediante excepciones
+
+- En un **enfoque imperativo tradicional**, consultar una clave inexistente lanza una excepción en tiempo de ejecución o requiere bloques `try-catch` y verificaciones explícitas con `null`, rompiendo la composición funcional.
+- Usando **`Option` y `withDefaultValue`**, la ausencia de datos queda representada explícitamente en el sistema de tipos de Scala (*Programming in Scala*, Cap. 15), garantizando funciones totales libres de excepciones.
+
+---
+
+## Ejemplo de uso
+
+```Scala
+println(conteoSeguro(registro)("Amazonas")) // 0
+println(conteoSeguro(registro)("Valle"))    // 3
+println(maximaDe(registro, "Choco"))        // Some(6.0)
+println(maximaDe(registro, "Amazonas"))     // None
+println(regionMasActiva(registro))          // Some(Valle)
+println(regionMasActiva(List()))            // None
+```
+
+---
+
+## Diagrama de flujo de ejecución en `regionMasActiva`
+
+```mermaid
+sequenceDiagram
+    participant Main as regionMasActiva(r)
+    participant Map as conteoPorRegion(r)
+    participant Filter as Filtro ganadoras
+    participant Ord as Desempate (.min)
+
+    Main->>Map: calcular frecuencias
+    Map-->>Main: conteo: Map[String, Int]
+    alt conteo.isEmpty == true
+        Main-->>Main: return None
+    else conteo.nonEmpty == true
+        Main->>Main: maximo = cantidades.max
+        Main->>Filter: filtrar regiones con cantidad == maximo
+        Filter-->>Main: ganadoras: Iterable[String]
+        Main->>Ord: ganadoras.min (orden alfabético)
+        Ord-->>Main: mejorRegion: String
+        Main-->>Main: return Some(mejorRegion)
+    end
+```

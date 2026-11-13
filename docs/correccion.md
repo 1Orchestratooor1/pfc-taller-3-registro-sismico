@@ -304,3 +304,120 @@ Aunque el orden de las tuplas en `pares` cambie al permutar $R$, el operador `.t
 
 3. **Invariancia en `porRegion` como multiconjunto de eventos por región:**
    Para cada región $\rho \in \text{Dom}(R)$, el filtro `sismo.region == region` es una función pura sin efectos secundarios; el conjunto de sismos seleccionados para $\rho$ depende únicamente de los atributos intrínsecos de cada `Sismo` en $R$, conservando exactamente los mismos elementos bajo cualquier estrategia de evaluación (ansiosa, perezosa o paralela).
+
+#  Punto 3: Consultas Seguras
+
+## 1. Especificación Matemática del Dominio y las Funciones
+
+Sea $\mathcal{S}$ el conjunto de registros sísmicos y sea $R \in \text{List}[\mathcal{S}]$ una lista finita de sismos con dominio activo $\text{Dom}(R) = \{ s.\text{region} \mid s \in R \}$. En el Punto 2 se demostró la corrección de $f_{\text{conteo}} : \text{List}[\mathcal{S}] \to (\text{Dom}(R) \to \mathbb{N}^+)$ y $f_{\text{max}} : \text{List}[\mathcal{S}] \to (\text{Dom}(R) \to \mathbb{R})$.
+
+Definimos las especificaciones totales para las consultas seguras:
+
+1. **Especificación de `conteoSeguro`:** Función $f_{\text{seguro}} : \text{List}[\mathcal{S}] \to (\text{String} \to \mathbb{N})$ tal que para toda cadena $\rho \in \text{String}$:
+
+```math
+f_{\text{seguro}}(R)(\rho) = \begin{cases} f_{\text{conteo}}(R)(\rho) & \text{si } \rho \in \text{Dom}(R) \\ 0 & \text{si } \rho \notin \text{Dom}(R) \end{cases}
+```
+
+2. **Especificación de `maximaDe`:** Función $f_{\text{maxDe}} : \text{List}[\mathcal{S}] \times \text{String} \to \text{Option}[\mathbb{R}]$ tal que:
+
+```math
+f_{\text{maxDe}}(R, \rho) = \begin{cases} \text{Some}(f_{\text{max}}(R)(\rho)) & \text{si } \rho \in \text{Dom}(R) \\ \text{None} & \text{si } \rho \notin \text{Dom}(R) \end{cases}
+```
+
+3. **Especificación de `regionMasActiva`:** Sea $\preceq_{\text{lex}}$ el orden total lexicográfico estricto sobre $\text{String}$. La función $f_{\text{activa}} : \text{List}[\mathcal{S}] \to \text{Option}[\text{String}]$ se define como:
+
+```math
+f_{\text{activa}}(R) = \begin{cases} \text{None} & \text{si } R == \text{Nil} \\ \text{Some}(\rho^*) & \text{si } R \neq \text{Nil} \end{cases}
+```
+
+donde $\rho^* \in \text{Dom}(R)$ es el único elemento que satisface:
+
+```math
+\forall \rho \in \text{Dom}(R) : \left( f_{\text{conteo}}(R)(\rho^*) > f_{\text{conteo}}(R)(\rho) \right) \lor \left( f_{\text{conteo}}(R)(\rho^*) == f_{\text{conteo}}(R)(\rho) \land \rho^* \preceq_{\text{lex}} \rho \right)
+```
+
+---
+
+## 2. Demostración Formal de Corrección
+
+### 2.1. Corrección de `conteoSeguro`
+
+El programa implementado es $P_{\text{seguro}}(R) = \text{conteoPorRegion}(R).\text{withDefaultValue}(0)$.
+
+Por la semántica operacional de `Map.WithDefault` en Scala (*Programming in Scala*, Cap. 17), para cualquier mapa base $M$ con dominio $\text{Dom}(M)$ y valor por defecto $d = 0$, la aplicación $M.\text{withDefaultValue}(0)(\rho)$ se evalúa como:
+
+```math
+M.\text{withDefaultValue}(0)(\rho) \rightarrow \begin{cases} M(\rho) & \text{si } \rho \in \text{Dom}(M) \\ 0 & \text{si } \rho \notin \text{Dom}(M) \end{cases}
+```
+
+Dado que por el Punto 2 se cumple $\text{Dom}(\text{conteoPorRegion}(R)) == \text{Dom}(R)$ y $\text{conteoPorRegion}(R)(\rho) == f_{\text{conteo}}(R)(\rho)$ para todo $\rho \in \text{Dom}(R)$, analizamos dos casos exhaustivos:
+
+- **Caso 1 ($\rho \in \text{Dom}(R)$):** $P_{\text{seguro}}(R)(\rho) \rightarrow \text{conteoPorRegion}(R)(\rho) == f_{\text{conteo}}(R)(\rho) == f_{\text{seguro}}(R)(\rho)$.
+- **Caso 2 ($\rho \notin \text{Dom}(R)$):** En particular, cuando $R = \text{Nil}$, $\text{Dom}(\text{Nil}) = \emptyset$, por lo que $\rho \notin \text{Dom}(R)$ para toda región $\rho$. Así, $P_{\text{seguro}}(R)(\rho) \rightarrow 0 == f_{\text{seguro}}(R)(\rho)$, sin lanzar excepciones y preservando $\text{keySet} == \text{Dom}(R)$.
+
+Por lo tanto, $P_{\text{seguro}}$ es una función total correcta respecto a $f_{\text{seguro}}$.
+
+---
+
+### 2.2. Corrección de `maximaDe`
+
+El programa implementado es $P_{\text{maxDe}}(R, \rho) = \text{magnitudMaxima}(R).\text{get}(\rho)$.
+
+Por la definición formal del método total `.get` sobre un mapa $M$:
+
+```math
+M.\text{get}(\rho) \rightarrow \begin{cases} \text{Some}(M(\rho)) & \text{si } \rho \in \text{Dom}(M) \\ \text{None} & \text{si } \rho \notin \text{Dom}(M) \end{cases}
+```
+
+Dado que $\text{Dom}(\text{magnitudMaxima}(R)) == \text{Dom}(R)$ y $\text{magnitudMaxima}(R)(\rho) == f_{\text{max}}(R)(\rho)$:
+
+- Si $\rho \in \text{Dom}(R)$, $P_{\text{maxDe}}(R, \rho) \rightarrow \text{Some}(f_{\text{max}}(R)(\rho)) == f_{\text{maxDe}}(R, \rho)$.
+- Si $\rho \notin \text{Dom}(R)$ (incluyendo el caso $R = \text{Nil}$), $P_{\text{maxDe}}(R, \rho) \rightarrow \text{None} == f_{\text{maxDe}}(R, \rho)$.
+
+En consecuencia, $P_{\text{maxDe}}$ es total y correcta respecto a su especificación.
+
+---
+
+### 2.3. Corrección de `regionMasActiva`
+
+Analizamos el programa $P_{\text{activa}}(R)$ por análisis de casos sobre la estructura de $R$:
+
+- **Caso base ($R = \text{Nil}$):**
+  Por el Punto 2, $\text{conteo} = \text{conteoPorRegion}(\text{Nil}) == \text{Map}()$, por lo que $\text{conteo}.\text{isEmpty}$ evalúa a `true`. La rama condicional retorna directamente `None`, coincidiendo con $f_{\text{activa}}(\text{Nil}) = \text{None}$ y evitando cualquier operación parcial sobre colecciones vacías.
+
+- **Caso no vacío ($R \neq \text{Nil}$):**
+    1. **No-vacuidad de `conteo` y `cantidades`:**
+       Como $R \neq \text{Nil}$, existe al menos un sismo $s \in R$, luego $\text{Dom}(R) \neq \emptyset$ y $\text{conteo}.\text{isEmpty}$ es `false`. La proyección `cantidades = conteo.map(_._2)` tiene cardinalidad $\vert{}\text{Dom}(R)\vert{} \geq 1$, garantizando que `maximo = cantidades.max` esté bien definido y calcule:
+
+```math
+\text{maximo} = \max_{\rho \in \text{Dom}(R)} f_{\text{conteo}}(R)(\rho)
+```
+
+2. **No-vacuidad y exactitud de `ganadoras`:**
+   Dado que el máximo de un conjunto finito no vacío es alcanzado por al menos un elemento del dominio, el conjunto de regiones filtradas:
+
+```math
+G = \{ \rho \in \text{Dom}(R) \mid f_{\text{conteo}}(R)(\rho) == \text{maximo} \}
+```
+
+     satisface $G \neq \emptyset$ y $G \subseteq \text{Dom}(R)$.
+
+3. **Unicidad del mínimo lexicográfico (`ganadoras.min`):**
+   Como $G$ es finito y no vacío, y la relación $\preceq_{\text{lex}}$ (`Ordering.String`) constituye un **orden total estricto** (irreflexivo, asimétrico, transitivo y conexo) sobre $\text{String}$, existe un único elemento mínimo $\rho^* = \min_{\preceq_{\text{lex}}}(G)$ tal que $\forall \rho \in G : \rho^* \preceq_{\text{lex}} \rho$.
+   Para todo $\rho \in \text{Dom}(R) \setminus G$, se cumple $f_{\text{conteo}}(R)(\rho) < \text{maximo} == f_{\text{conteo}}(R)(\rho^*)$.
+
+Por lo tanto, el retorno `Some(ganadoras.min)` coincide exactamente con $\text{Some}(\rho^*) = f_{\text{activa}}(R)$.
+
+---
+
+## 3. Argumentación de por qué el resultado no depende del orden del recorrido
+
+1. **Invariancia en `conteoSeguro` y `maximaDe` (Extensionalidad funcional):**
+   Ambos programas son composiciones puras de las funciones del Punto 2 (`conteoPorRegion` y `magnitudMaxima`) con operadores totales sin estado (`withDefaultValue(0)` y `get`). Como ya se demostró que los mapas subyacentes son extensionalmente invariantes ante cualquier permutación $\pi(R)$ de los registros de entrada, la consulta por clave $\rho$ retorna exactamente el mismo valor bajo cualquier orden de evaluación o recorrido de $R$.
+
+2. **Invariancia en `regionMasActiva` (Conmutatividad e idempotencia de $\max$ y $\min$):**
+   Aunque iterar sobre un `Map[String, Int]` (`for ((region, cantidad) <- conteo)`) puede visitar las parejas clave-valor en cualquier orden interno (dependiente de la tabla hash o estructura del mapa), el resultado final de `regionMasActiva` es completamente independiente del orden de recorrido de `conteo`:
+    - El cálculo de `maximo` aplica el operador binario $\max : \mathbb{N} \times \mathbb{N} \to \mathbb{N}$, el cual es **conmutativo** ($\max(a, b) = \max(b, a)$) y **asociativo** ($\max(a, \max(b, c)) = \max(\max(a, b), c)$).
+    - El filtrado de `ganadoras` selecciona todos los elementos que cumplen el predicado puro `cantidad == maximo`, produciendo el mismo conjunto $G$ independientemente del orden en que se evalúen las claves.
+    - La selección final `ganadoras.min` aplica el operador de mínimo lexicográfico $\min_{\preceq_{\text{lex}}} : \text{String} \times \text{String} \to \text{String}$, que también es **conmutativo**, **asociativo** e **idempotente** sobre un orden total. En consecuencia, para cualquier permutación $\sigma(G)$ de las regiones empatadas, $\min_{\preceq_{\text{lex}}}(\sigma(G)) == \min_{\preceq_{\text{lex}}}(G) == \rho^*$.
