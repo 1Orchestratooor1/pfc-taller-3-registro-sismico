@@ -269,6 +269,32 @@ class RegistroSismicoTest extends AnyFunSuite {
     assert(replicasSensibles(3.0, 3.0) == List())
   }
 
+  // Estas son las 5 pruebas adicionales para demostrar la validez de las definciones - punto 4
+
+  test("replicas: evalúa 6 elementos aplicando correctamente el redondeo a 2 decimales") {
+    // 5.0 * 0.8^4 = 2.048 -> 2.05; 5.0 * 0.8^5 = 1.6384 -> 1.64
+    assert(replicas(5.0).take(6).toList == List(5.0, 4.0, 3.2, 2.56, 2.05, 1.64))
+  }
+
+  test("replicas: con magnitud inicial 0.0 genera una secuencia infinita de ceros") {
+    assert(replicas(0.0).take(5).toList == List(0.0, 0.0, 0.0, 0.0, 0.0))
+  }
+
+  test("replicasSensibles: la condición de mínimo es estricta (igualdad exacta se excluye)") {
+    // replicas(5.0) produce 5.0, 4.0, 3.2, 2.56...
+    // Con minimo = 3.2, el 3.2 no debe incluirse porque se exige x > minimo
+    assert(replicasSensibles(5.0, 3.2) == List(5.0, 4.0))
+  }
+
+  test("replicasSensibles: devuelve lista vacía cuando magnitud es igual al mínimo") {
+    assert(replicasSensibles(4.5, 4.5) == List())
+  }
+
+  test("replicasSensibles: evalúa exactamente hasta antes del primer valor menor o igual al mínimo") {
+    // replicas(6.0) -> 6.0, 4.8, 3.84, 3.072 (3.07), 2.4576 (2.46)
+    assert(replicasSensibles(6.0, 3.0) == List(6.0, 4.8, 3.84, 3.07))
+  }
+
   // Punto 5 -------------------------------------------------------------------
 
   test("informe: el resumen de las tres regiones") {

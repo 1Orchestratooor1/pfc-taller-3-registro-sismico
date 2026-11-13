@@ -421,3 +421,122 @@ Por lo tanto, el retorno `Some(ganadoras.min)` coincide exactamente con $\text{S
     - El cálculo de `maximo` aplica el operador binario $\max : \mathbb{N} \times \mathbb{N} \to \mathbb{N}$, el cual es **conmutativo** ($\max(a, b) = \max(b, a)$) y **asociativo** ($\max(a, \max(b, c)) = \max(\max(a, b), c)$).
     - El filtrado de `ganadoras` selecciona todos los elementos que cumplen el predicado puro `cantidad == maximo`, produciendo el mismo conjunto $G$ independientemente del orden en que se evalúen las claves.
     - La selección final `ganadoras.min` aplica el operador de mínimo lexicográfico $\min_{\preceq_{\text{lex}}} : \text{String} \times \text{String} \to \text{String}$, que también es **conmutativo**, **asociativo** e **idempotente** sobre un orden total. En consecuencia, para cualquier permutación $\sigma(G)$ de las regiones empatadas, $\min_{\preceq_{\text{lex}}}(\sigma(G)) == \min_{\preceq_{\text{lex}}}(G) == \rho^*$.
+
+# Punto 4: Réplicas Perezosas
+
+## 1. Especificación Matemática del Dominio y las Funciones
+
+Sea $m \in \mathbb{R}_{\geq 0}$ la magnitud inicial de un sismo y sea $\text{round}_2 : \mathbb{R} \to \mathbb{R}$ la función de redondeo a dos cifras decimales definida por:
+
+```math
+\text{round}_2(x) = \frac{\lfloor 100x + 0.5 \rfloor}{100}
+```
+
+Definimos la sucesión infinita de réplicas $S(m) = (a_0, a_1, a_2, \ldots) \in \mathbb{R}^{\mathbb{N}}$ mediante la progresión geométrica de razón $r = 0.8$ proyectada con $\text{round}_2$:
+
+```math
+a_k = \text{round}_2\left(m \cdot (0.8)^k\right), \quad \forall k \in \mathbb{N}
+```
+
+Definimos las especificaciones formales para `replicas` y `replicasSensibles`:
+
+1. **Especificación de `replicas`:** Dado $m \in \mathbb{R}_{\geq 0}$, produce el flujo infinito $f_{\text{replicas}}(m) = [a_0, a_1, a_2, \ldots]$ tal que para todo prefijo finito de longitud $n \in \mathbb{N}$:
+
+```math
+f_{\text{replicas}}(m).\text{take}(n) == [a_0, a_1, \ldots, a_{n-1}]
+```
+
+2. **Especificación de `replicasSensibles`:** Dado $m \in \mathbb{R}_{\geq 0}$ y un umbral mínimo $\mu \in \mathbb{R}_{> 0}$, retorna el mayor prefijo continuo $[a_0, a_1, \ldots, a_{K-1}]$ de $f_{\text{replicas}}(m)$ cuyos elementos superan estrictamente $\mu$:
+
+```math
+f_{\text{sensibles}}(m, \mu) = [a_0, a_1, \ldots, a_{K-1}] \iff \left(\forall i < K : a_i > \mu\right) \land \left(a_K \leq \mu\right)
+```
+
+En particular, si $a_0 = \text{round}_2(m) \leq \mu$, entonces $K = 0$ y $f_{\text{sensibles}}(m, \mu) == \text{Nil}$.
+
+---
+
+## 2. Demostración Formal de Corrección
+
+### 2.1. Corrección de `redondear`
+
+El programa auxiliar es:
+
+```scala
+def redondear(x: Double): Double = Math.round(x * 100.0) / 100.0
+```
+
+Por la especificación estándar de `Math.round(y)` en la JVM para reales no negativos ($y \geq 0$), $\text{Math.round}(y) = \lfloor y + 0.5 \rfloor$. Al sustituir $y = 100x$ y dividir entre $100.0$, se cumple directamente:
+
+```math
+\forall x \in \mathbb{R}_{\geq 0} : \text{redondear}(x) == \frac{\lfloor 100x + 0.5 \rfloor}{100} == \text{round}_2(x)
+```
+
+---
+
+### 2.2. Corrección de `replicas` por Coinducción (Inducción sobre el índice $k \in \mathbb{N}$)
+
+Sea $E(x)$ la función `secuenciaExacta(x) = x #:: secuenciaExacta(x * 0.8)` y sea $P_{\text{replicas}}(m) = E(m).\text{map}(\text{redondear})$.
+
+Dado que $P_{\text{replicas}}(m)$ es una estructura coinductiva infinita (`LazyList[Double]`), demostramos su igualdad bisimilar probando por inducción matemática sobre $k \in \mathbb{N}$ que el $k$-ésimo elemento $P_{\text{replicas}}(m)(k)$ coincide con $a_k$:
+
+- **Lema auxiliar:** Para todo $x \in \mathbb{R}$ y todo $k \in \mathbb{N}$, el $k$-ésimo elemento de $E(x)$ satisface $E(x)(k) == x \cdot (0.8)^k$.
+    - **Caso base ($k = 0$):** Por definición del constructor perezoso `#::`, $(x \mathbin{\#::} \text{cola})(0) \rightarrow x == x \cdot (0.8)^0$.
+    - **Paso inductivo ($k + 1$):** Supongamos como hipótesis de inducción (HI) que $\forall x \in \mathbb{R} : E(x)(k) == x \cdot (0.8)^k$. Avanzando a la cola de $E(x)$:
+
+```math
+E(x)(k + 1) \rightarrow E(x \cdot 0.8)(k) \stackrel{\text{HI}}{=} (x \cdot 0.8) \cdot (0.8)^k == x \cdot (0.8)^{k+1}
+```
+
+- **Teorema principal para `replicas`:** Aplicando la definición de `LazyList.map(redondear)` sobre el $k$-ésimo término:
+
+```math
+\forall k \in \mathbb{N} : P_{\text{replicas}}(m)(k) \rightarrow \text{redondear}(E(m)(k)) == \text{round}_2\left(m \cdot (0.8)^k\right) == a_k
+```
+
+En consecuencia, todo prefijo finito de longitud $n$ extraído mediante `.take(n).toList` evalúa exactamente los nodos $0, 1, \ldots, n-1$ en tiempo finito y coincide con $f_{\text{replicas}}(m).\text{take}(n)$.
+
+---
+
+### 2.3. Corrección y Terminación de `replicasSensibles`
+
+El programa implementado es:
+
+```scala
+def replicasSensibles(magnitud: Double, minimo: Double): List[Double] =
+  replicas(magnitud).takeWhile(x => x > minimo).toList
+```
+
+Demostramos **terminación** (ausencia de divergencia sobre un flujo infinito) y **corrección parcial** para todo $m \in \mathbb{R}_{\geq 0}$ y todo $\mu \in \mathbb{R}_{> 0}$:
+
+1. **Garantía de terminación (Existencia de índice de corte $K$):**
+   La sucesión exacta $x_k = m \cdot (0.8)^k$ es una serie geométrica de razón $0 < 0.8 < 1$, por lo que converge a cero:
+
+```math
+\lim_{k \to \infty} m \cdot (0.8)^k = 0
+```
+
+Dado $\mu > 0$, por definición de límite existe un entero $N \in \mathbb{N}$ tal que $\forall k \geq N : m \cdot (0.8)^k < \frac{\mu}{2}$. Como el redondeo a dos decimales satisface $\vert{}\text{round}_2(x) - x\vert{} \leq 0.005$, para suficientemente grande $k$ se tiene $a_k = \text{round}_2(x_k) \leq \mu$.
+Sea $K = \min \{ k \in \mathbb{N} \mid a_k \leq \mu \}$. El conjunto es no vacío y bien ordenado en $\mathbb{N}$, por lo que $K$ existe y es finito.
+
+2. **Exactitud del prefijo retenido por `takeWhile`:**
+    - **Caso $K = 0$ ($a_0 \leq \mu$):** El predicado $a_0 > \mu$ evalúa a `false` en el primer nodo. `takeWhile` retorna `LazyList.empty` sin forzar la cola y `.toList` devuelve `Nil`, cumpliendo $f_{\text{sensibles}}(m, \mu) == \text{Nil}$.
+    - **Caso $K \geq 1$:** Por minimalidad de $K$, $\forall i \in \{0, \ldots, K - 1\}$ se cumple $a_i > \mu$, por lo que `takeWhile` retiene todos los elementos desde el índice $0$ hasta $K - 1$. En el índice $K$, $a_K > \mu$ es `false` y `takeWhile` detiene la evaluación, retornando $[a_0, a_1, \ldots, a_{K-1}] == f_{\text{sensibles}}(m, \mu)$.
+
+---
+
+## 3. Argumentación de por qué el resultado no depende del orden del recorrido
+
+Desde el modelo de evaluación normal y flujo de datos (*SICP*, Cap. 3.5; *Programming in Scala*, Cap. 24), `replicas` y `replicasSensibles` son **funciones puras** basadas en una relación funcional cerrada $a_k = \text{round}_2(m \cdot (0.8)^k)$:
+
+1. **Determinismo posicional de cada término (Independencia del orden de forzado):**
+   Cada elemento $a_k$ del `LazyList` depende **exclusivamente** de la magnitud inicial $m$ y de su índice $k$ mediante una expresión aritmética cerrada sin estado mutable ni acumuladores compartidos entre nodos:
+
+```math
+a_k = \text{round}_2\left(m \cdot (0.8)^k\right)
+```
+
+Por tanto, si los nodos de un prefijo $[0, \ldots, n-1]$ son forzados secuencialmente de izquierda a derecha, consultados en orden aleatorio mediante indexación directa `replicas(m)(k)`, o calculados en paralelo asignando cada índice $k$ a un hilo independiente y ordenando por $k$, el valor obtenido en cada posición $k$ es matemáticamente idéntico.
+
+2. **Invariancia frente a la estrategia de evaluación (Perezosa vs. Estricta acotada):**
+   Debido a la **transparencia referencial**, sustituir una expresión diferida (*thunk*) por su valor evaluado no altera el significado del programa (*Teorema de Church-Rosser* en el cálculo $\lambda$). Mientras el conjunto de índices evaluados sea finito ($k < n$ en `take(n)` o $k \leq K$ en `takeWhile`), el orden temporal en que se fuerzan las clausuras (`head` antes que `tail` o memorización previa) produce exactamente la misma secuencia de salida.

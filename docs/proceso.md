@@ -700,3 +700,165 @@ sequenceDiagram
         Main-->>Main: return Some(mejorRegion)
     end
 ```
+
+# Punto 4: réplicas perezosas
+
+## Definición de los Algoritmos
+
+```Scala
+def redondear(x: Double): Double = Math.round(x * 100.0) / 100.0
+
+/** La secuencia infinita que empieza en la magnitud y multiplica por 0.8. */
+def replicas(magnitud: Double): LazyList[Double] = {
+  def secuenciaExacta(actual: Double): LazyList[Double] =
+    actual #:: secuenciaExacta(actual * 0.8)
+
+  for (x <- secuenciaExacta(magnitud)) yield redondear(x)
+}
+
+def replicasSensibles(magnitud: Double, minimo: Double): List[Double] =
+  replicas(magnitud).takeWhile(x => x > minimo).toList
+```
+
+- La función auxiliar `redondear` encapsula la fórmula aritmética `Math.round(x * 100.0) / 100.0` como una abstracción procedimental pura (*SICP*, Cap. 1.1.4) para aproximar valores de punto flotante a dos cifras decimales.
+- La función `replicas` construye una secuencia perezosa infinita (`LazyList[Double]`) que modela la atenuación exponencial de un sismo mediante un factor de $0.8$ por iteración:
+  - `secuenciaExacta(actual)`: función recursiva perezosa que mantiene los valores exactos en punto flotante usando el operador `#::` (construcción con cola diferida).
+  - La expresión `for` proyecta cada término exacto mediante `redondear(x)` bajo demanda, evitando acumular errores de redondeo entre iteraciones sucesivas.
+- La función `replicasSensibles` consume el `LazyList` infinito generado por `replicas` deteniendo la evaluación en cuanto un término deja de superar estrictamente `minimo`, y materializa el prefijo resultante en un `List[Double]`.
+
+---
+
+## Traducción de las Expresiones `for`
+
+El compilador de Scala desazucara la expresión `for` presente en `replicas` a una invocación del método `map` sobre el `LazyList` retornado por `secuenciaExacta(magnitud)` (*Programming in Scala*, Cap. 23 y Cap. 24):
+
+```Scala
+secuenciaExacta(magnitud).map(x => redondear(x))
+```
+
+- Al ejecutarse sobre un `LazyList`, `.map` es **estrictamente perezoso**: no recorre la secuencia infinita al momento de invocar `replicas(magnitud)`, sino que envuelve la transformación `redondear(x)` en un nuevo nodo diferido que solo se evalúa cuando un consumidor solicita la cabeza (`head`) o avanza hacia la cola (`tail`).
+
+---
+
+## Explicación paso a paso
+
+### Construcción perezosa con `#::` (*Call-by-Need*)
+
+```Scala
+actual #:: secuenciaExacta(actual * 0.8)
+```
+
+- A diferencia del constructor estricto `::` de `List` (que evalúa tanto la cabeza como la cola antes de construir el nodo), `#::` recibe su segundo argumento por nombre (*by-name parameter*).
+- Cuando se invoca `replicas(magnitud)`, Scala construye únicamente la cabeza del primer nodo (`redondear(magnitud)`) y suspende la llamada recursiva `secuenciaExacta(magnitud * 0.8)` dentro de un *thunk* (clausura sin evaluar).
+- Cada vez que se solicita el siguiente elemento, se fuerza el *thunk* pendiente, se calcula un único paso más y el resultado queda memoizado en memoria para evitar recálculos si se vuelve a consultar.
+
+### Evaluación acotada en `replicasSensibles`
+
+```Scala
+replicas(magnitud).takeWhile(x => x > minimo).toList
+```
+
+1. Se invoca `replicas(magnitud)`, obteniendo la referencia a la cabeza diferida del `LazyList`.
+2. `takeWhile(x => x > minimo)` inspecciona un nodo a la vez:
+  - Si `x > minimo` es `true`, conserva el valor y fuerza el siguiente nodo de la cola.
+  - En cuanto encuentra el primer elemento con `x <= minimo`, detiene inmediatamente la evaluación y descarta el resto de la secuencia infinita.
+3. `.toList` convierte los elementos recolectados antes del corte en una lista estricta finita.
+
+---
+
+## Traza de ejecución paso a paso
+
+Ejemplo con `replicasSensibles(5.0, 3.0)`:
+
+### Paso 1: Llamada inicial y nodo 0
+
+```Scala
+replicas(5.0)
+// secuenciaExacta(5.0) -> cabeza = 5.0, cola = <thunk: secuenciaExacta(4.0)>
+// map(redondear)       -> cabeza = redondear(5.0) = 5.0
+// takeWhile(5.0 > 3.0) -> true -> conserva 5.0 y solicita siguiente nodo
+```
+
+### Paso 2: Forzado del nodo 1
+
+```Scala
+// Evalúa <thunk>: secuenciaExacta(4.0) -> cabeza = 4.0, cola = <thunk: secuenciaExacta(3.2)>
+// map(redondear)       -> cabeza = redondear(4.0) = 4.0
+// takeWhile(4.0 > 3.0) -> true -> conserva 4.0 y solicita siguiente nodo
+```
+
+### Paso 3: Forzado del nodo 2
+
+```Scala
+// Evalúa <thunk>: secuenciaExacta(3.2) -> cabeza = 3.2, cola = <thunk: secuenciaExacta(2.56)>
+// map(redondear)       -> cabeza = redondear(3.2) = 3.2
+// takeWhile(3.2 > 3.0) -> true -> conserva 3.2 y solicita siguiente nodo
+```
+
+### Paso 4: Forzado del nodo 3 y condición de parada
+
+```Scala
+// Evalúa <thunk>: secuenciaExacta(2.56) -> cabeza = 2.56, cola = <thunk: secuenciaExacta(2.048)>
+// map(redondear)        -> cabeza = redondear(2.56) = 2.56
+// takeWhile(2.56 > 3.0) -> false -> detiene la evaluación (no fuerza 2.048)
+```
+
+### Paso 5: Materialización y retorno
+
+```Scala
+return List(5.0, 4.0, 3.2)
+```
+
+---
+
+## Diferencia con colecciones estrictas (`List`)
+
+- Con una **colección estricta (`List`)**, definir una recursión sin caso base como `actual :: secuenciaExacta(actual * 0.8)` provoca un desbordamiento de pila (`StackOverflowError`) o un ciclo infinito antes de poder aplicar `.take(4)` o `.takeWhile(...)`, porque el productor intenta construir todos los elementos por adelantado.
+- Con **`LazyList`**, se desacopla la **generación** de la secuencia infinita (productor) de la **condición de parada** (consumidor) (*SICP*, Sec. 3.5.1), permitiendo expresar modelos matemáticos infinitos de manera finita y segura.
+
+---
+
+## Ejemplo de uso
+
+```Scala
+val primerasCuatro = replicas(5.0).take(4).toList
+println(primerasCuatro) // List(5.0, 4.0, 3.2, 2.56)
+
+val sensibles = replicasSensibles(5.0, 3.0)
+println(sensibles)      // List(5.0, 4.0, 3.2)
+
+val sinSensibles = replicasSensibles(2.0, 3.0)
+println(sinSensibles)   // List()
+```
+
+---
+
+## Diagrama de evaluación bajo demanda en `replicasSensibles(5.0, 3.0)`
+
+```mermaid
+sequenceDiagram
+    participant Consumidor as replicasSensibles(5.0, 3.0)
+    participant Map as LazyList.map(redondear)
+    participant Gen as secuenciaExacta
+
+    Consumidor->>Map: solicitar elemento 0
+    Map->>Gen: evaluar cabeza (5.0)
+    Gen-->>Map: 5.0 + <thunk(4.0)>
+    Map-->>Consumidor: 5.0 (5.0 > 3.0: true)
+
+    Consumidor->>Map: solicitar elemento 1
+    Map->>Gen: forzar <thunk(4.0)>
+    Gen-->>Map: 4.0 + <thunk(3.2)>
+    Map-->>Consumidor: 4.0 (4.0 > 3.0: true)
+
+    Consumidor->>Map: solicitar elemento 2
+    Map->>Gen: forzar <thunk(3.2)>
+    Gen-->>Map: 3.2 + <thunk(2.56)>
+    Map-->>Consumidor: 3.2 (3.2 > 3.0: true)
+
+    Consumidor->>Map: solicitar elemento 3
+    Map->>Gen: forzar <thunk(2.56)>
+    Gen-->>Map: 2.56 + <thunk(2.048)>
+    Map-->>Consumidor: 2.56 (2.56 > 3.0: false -> corte)
+    Consumidor->>Consumidor: return List(5.0, 4.0, 3.2)
+```
